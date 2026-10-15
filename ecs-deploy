@@ -14,6 +14,8 @@ TIMEOUT=90
 VERBOSE=false
 TAGVAR=false
 TAGONLY=""
+REPLACE_IMAGE_REPO=""
+FAIL_ON_UNCHANGED_IMAGE=false
 ENABLE_ROLLBACK=false
 WAIT_COMPLETION=false
 IS_ROLLBACK=false
@@ -52,6 +54,8 @@ Optional arguments:
     -e | --tag-env-var      Get image tag name from environment variable. If provided this will override value specified in image name argument.
     -to | --tag-only        New tag to apply to all images defined in the task (multi-container task). If provided this will override value specified in image name argument.
     --max-definitions       Number of Task Definition Revisions to persist before deregistering oldest revisions.
+    --replace-image-repo    Also replace images from this repository (no tag) with the new image. Use when moving a service to a new repository.
+    --fail-on-unchanged-image  Exit with an error instead of registering a task definition where no container uses the new image.
     --enable-rollback       Rollback task definition if new version is not running before TIMEOUT
     --wait-completion       Wait for the full deployment completion by checking if the service is stable
     --rollback              Rollback task definition to the previous one used before the deployment
@@ -300,6 +304,20 @@ function createNewTaskDefJson() {
             | sed -e "s|\"image\": *\"${imageWithoutTag}:.*\"|\"image\": \"${useImage}\"|g" \
             | sed -e "s|\"image\": *\"${imageWithoutTag}\"|\"image\": \"${useImage}\"|g" \
             | jq '.taskDefinition' )
+
+      # Images are only replaced when their repository matches the new image's, so a task definition
+      # still pointing at an older repository would be re-registered unchanged
+      if [[ -n "$REPLACE_IMAGE_REPO" ]]; then
+        DEF=$( echo "$DEF" \
+              | sed -e "s|\"image\": *\"${REPLACE_IMAGE_REPO}:.*\"|\"image\": \"${useImage}\"|g" \
+              | sed -e "s|\"image\": *\"${REPLACE_IMAGE_REPO}\"|\"image\": \"${useImage}\"|g" )
+      fi
+
+      if [[ "$FAIL_ON_UNCHANGED_IMAGE" == true ]] && \
+         ! echo "$DEF" | jq --exit-status --arg image "$useImage" 'any(.containerDefinitions[]; .image == $image)' > /dev/null; then
+        echo "No container image in the task definition matches ${imageWithoutTag}${REPLACE_IMAGE_REPO:+ or ${REPLACE_IMAGE_REPO}}, so ${useImage} would not be deployed"
+        exit 14
+      fi
     else
       DEF=$( echo "$TASK_DEFINITION" \
             | sed -e "s|\(\"image\": *\".*:\)\(.*\)\"|\1${useImage}\"|g" \
@@ -560,6 +578,13 @@ if [ "$BASH_SOURCE" == "$0" ]; then
             --max-definitions)
                 MAX_DEFINITIONS="$2"
                 shift
+                ;;
+            --replace-image-repo)
+                REPLACE_IMAGE_REPO="$2"
+                shift
+                ;;
+            --fail-on-unchanged-image)
+                FAIL_ON_UNCHANGED_IMAGE=true
                 ;;
             --enable-rollback)
                 ENABLE_ROLLBACK=true
