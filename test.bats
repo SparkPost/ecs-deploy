@@ -528,3 +528,68 @@ EOF
   [ ! -z $status ]
   [ $output == $expected ]
 }
+
+legacyRepoTaskDefinition() {
+  cat <<JSON
+{
+    "taskDefinition": {
+        "status": "ACTIVE",
+        "networkMode": "bridge",
+        "family": "app-task-def",
+        "volumes": [],
+        "taskDefinitionArn": "arn:aws:ecs:us-east-1:121212345678:task-definition/app-task-def:123",
+        "containerDefinitions": [
+            {
+                "name": "API",
+                "image": "343434345678.dkr.ecr.us-east-1.amazonaws.com/legacy-repo:1487623908",
+                "essential": true,
+                "memory": 128,
+                "cpu": 200
+            }
+        ],
+        "placementConstraints": null,
+        "revision": 123
+    }
+}
+JSON
+}
+
+@test "test createNewTaskDefJson leaves an image from another repository unchanged" {
+  imageWithoutTag="121212345678.dkr.ecr.us-east-1.amazonaws.com/acct/repo"
+  useImage="121212345678.dkr.ecr.us-east-1.amazonaws.com/acct/repo:1111111111"
+  TASK_DEFINITION=$(legacyRepoTaskDefinition)
+  run createNewTaskDefJson
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.containerDefinitions[0].image')" == "343434345678.dkr.ecr.us-east-1.amazonaws.com/legacy-repo:1487623908" ]
+}
+
+@test "test createNewTaskDefJson with replace image repo replaces an image from that repository" {
+  imageWithoutTag="121212345678.dkr.ecr.us-east-1.amazonaws.com/acct/repo"
+  useImage="121212345678.dkr.ecr.us-east-1.amazonaws.com/acct/repo:1111111111"
+  REPLACE_IMAGE_REPO="343434345678.dkr.ecr.us-east-1.amazonaws.com/legacy-repo"
+  TASK_DEFINITION=$(legacyRepoTaskDefinition)
+  run createNewTaskDefJson
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.containerDefinitions[0].image')" == "$useImage" ]
+}
+
+@test "test createNewTaskDefJson with fail on unchanged image exits when no image matches" {
+  imageWithoutTag="121212345678.dkr.ecr.us-east-1.amazonaws.com/acct/repo"
+  useImage="121212345678.dkr.ecr.us-east-1.amazonaws.com/acct/repo:1111111111"
+  FAIL_ON_UNCHANGED_IMAGE=true
+  TASK_DEFINITION=$(legacyRepoTaskDefinition)
+  run createNewTaskDefJson
+  [ "$status" -eq 14 ]
+  [[ "$output" == "No container image in the task definition matches ${imageWithoutTag}, so ${useImage} would not be deployed" ]]
+}
+
+@test "test createNewTaskDefJson with fail on unchanged image passes when the image is replaced" {
+  imageWithoutTag="121212345678.dkr.ecr.us-east-1.amazonaws.com/acct/repo"
+  useImage="121212345678.dkr.ecr.us-east-1.amazonaws.com/acct/repo:1111111111"
+  REPLACE_IMAGE_REPO="343434345678.dkr.ecr.us-east-1.amazonaws.com/legacy-repo"
+  FAIL_ON_UNCHANGED_IMAGE=true
+  TASK_DEFINITION=$(legacyRepoTaskDefinition)
+  run createNewTaskDefJson
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.containerDefinitions[0].image')" == "$useImage" ]
+}
